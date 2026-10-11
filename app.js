@@ -54,7 +54,7 @@ function renderChips() {
     const b = document.createElement("button");
     b.type = "button"; b.className = "chip";
     b.textContent = e.dose ? e.name + " " + e.dose : e.name;
-    b.onclick = () => { $("name").value = e.name; $("dose").value = e.dose; $("dose").focus(); };
+    b.onclick = () => { $("name").value = e.name; $("dose").value = e.dose; currentChoice = null; renderDoseChips([]); $("dose").focus(); };
     chips.append(b);
   }
   chips.hidden = seen.size === 0;
@@ -108,6 +108,7 @@ function render() {
 
 function resetForm() {
   $("dose-form").reset();
+  currentChoice = null; renderDoseChips([]);
   $("entry-id").value = "";
   $("save").textContent = "Log dose";
   $("cancel").hidden = true;
@@ -415,6 +416,18 @@ async function getJSON(url, signal) {
   if (!res.ok) throw new Error("HTTP " + res.status);
   return res.json();
 }
+function unitText(u) {
+  const x = String(u || "").trim().toLowerCase();
+  return x === "iu" ? "IU" : x;
+}
+function strengthText(r) {
+  const n = String(r.strength ?? "").trim();
+  return n ? (n + " " + unitText(r.strength_unit)).trim() : "";
+}
+function fdaStrength(list) {
+  const parts = (Array.isArray(list) ? list : []).map((a) => String(a.strength || "").replace(/\/1$/, "").trim()).filter(Boolean);
+  return parts.length ? parts.join(" / ") : "";
+}
 async function fetchLive(q, signal) {
   const safe = q.replace(/[^a-z0-9 ]/gi, " ").replace(/\s+/g, " ").trim();
   if (safe.length < 3) return { options: [], failed: false, report: "" };
@@ -422,32 +435,44 @@ async function fetchLive(q, signal) {
   const first = encodeURIComponent(safe.split(" ")[0]);
   const jobs = [
     getJSON("https://health-products.canada.ca/api/drug/drugproduct/?brandname=" + full + "&lang=en&type=json", signal)
-      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.brand_name), sub: "Health Canada" }))),
+      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.brand_name), sub: "Health Canada", code: r.drug_code }))),
     getJSON("https://health-products.canada.ca/api/drug/activeingredient/?ingredientname=" + full + "&lang=en&type=json", signal)
-      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.ingredient_name), sub: "Health Canada" }))),
+      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.ingredient_name), sub: "Health Canada", dose: strengthText(r) }))),
     getJSON("https://api.fda.gov/drug/ndc.json?search=brand_name:" + first + "*+OR+generic_name:" + first + "*&limit=25", signal)
       .then((j) => (j && Array.isArray(j.results) ? j.results : []).map((r) => {
         const generic = String(r.generic_name || "").toLowerCase();
-        return { name: titleCase(r.brand_name || r.generic_name), generic: generic.length <= 40 ? generic : "", sub: "FDA" };
+        return { name: titleCase(r.brand_name || r.generic_name), generic: generic.length <= 40 ? generic : "", sub: "FDA", dose: fdaStrength(r.active_ingredients) };
       })),
   ];
   const settled = await Promise.allSettled(jobs);
   const names = ["Health Canada brands", "Health Canada ingredients", "FDA"];
   const report = settled.map((r, i) => names[i] + ": " + (r.status === "fulfilled" ? r.value.length + " found" : "no response")).join(" · ");
-  const seen = new Set();
-  const options = [];
+  const byValue = new Map();
   for (const r of settled) {
     if (r.status !== "fulfilled") continue;
     for (const item of r.value) {
       if (!item.name) continue;
       const value = item.generic && item.generic !== item.name.toLowerCase() ? item.name + " (" + item.generic + ")" : item.name;
       const k = value.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      options.push({ label: item.name, value, sub: item.generic || item.sub, key: item.name.toLowerCase() });
+      let o = byValue.get(k);
+      if (!o) { o = { label: item.name, value, sub: item.generic || item.sub, key: item.name.toLowerCase(), doses: [], codes: [] }; byValue.set(k, o); }
+      if (item.dose && !o.doses.includes(item.dose)) o.doses.push(item.dose);
+      if (item.code && o.codes.length < 6 && !o.codes.includes(item.code)) o.codes.push(item.code);
     }
   }
-  return { options: options.slice(0, 60), failed: settled.every((r) => r.status === "rejected"), report };
+  return { options: [...byValue.values()].slice(0, 60), failed: settled.every((r) => r.status === "rejected"), report };
+}
+// Strengths for a Health Canada brand: one request per product code (a brand can have several products).
+async function fetchStrengthsByCode(codes) {
+  const out = [];
+  const results = await Promise.allSettled(codes.map((c) =>
+    getJSON("https://health-products.canada.ca/api/drug/activeingredient/?id=" + encodeURIComponent(c) + "&lang=en&type=json")));
+  for (const r of results) {
+    if (r.status !== "fulfilled" || !Array.isArray(r.value)) continue;
+    const text = r.value.map(strengthText).filter(Boolean).join(" / ");
+    if (text && !out.includes(text)) out.push(text);
+  }
+  return out;
 }
 function scheduleLive() {
   if (!liveEnabled()) return;
@@ -517,9 +542,52 @@ function highlight(i) {
   if (i >= 0) { $("name").setAttribute("aria-activedescendant", "opt-" + i); $("suggest").children[i].scrollIntoView({ block: "nearest" }); }
   else $("name").removeAttribute("aria-activedescendant");
 }
+let currentChoice = null;
+function lastDose(name) {
+  const key = name.trim().toLowerCase();
+  const hit = [...log].sort((a, b) => b.takenAt.localeCompare(a.takenAt)).find((e) => e.name.toLowerCase() === key && e.dose);
+  return hit ? hit.dose : "";
+}
+function renderDoseChips(doses) {
+  const box = $("dose-chips");
+  box.replaceChildren();
+  for (const d of doses) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = d;
+    b.onclick = () => { $("dose").value = d; };
+    box.append(b);
+  }
+  box.hidden = doses.length === 0;
+}
+async function showDoses(chosen) {
+  let o = chosen;
+  const last = lastDose(o.value);
+  const known = [...(o.doses || [])];
+  // A "Logged before" suggestion has no database details of its own; borrow them from a matching online result.
+  if (o.recent) {
+    for (const opts of liveCache.values()) {
+      const m = opts.find((x) => x.value.toLowerCase() === o.value.toLowerCase());
+      if (m) { known.push(...m.doses); o = { ...o, codes: m.codes }; break; }
+    }
+  }
+  const list = () => [...new Set([last, ...known].filter(Boolean))].slice(0, 10);
+  const prefill = () => {
+    if ($("dose").value.trim()) return;
+    if (last) $("dose").value = last;
+    else if (list().length === 1) $("dose").value = list()[0];
+  };
+  renderDoseChips(list()); prefill();
+  if (o.codes && o.codes.length && liveEnabled()) {
+    try { known.push(...(await fetchStrengthsByCode(o.codes))); } catch {}
+    if (currentChoice !== chosen) return;
+    renderDoseChips(list()); prefill();
+  }
+}
 function choose(o) {
   $("name").value = o.value;
+  currentChoice = o;
   closeList();
+  showDoses(o);
   $("dose").focus();
 }
 function openList() {
@@ -542,7 +610,10 @@ function openList() {
   });
   ul.hidden = false; $("name").setAttribute("aria-expanded", "true"); active = -1;
 }
-$("name").addEventListener("input", () => { openList(); scheduleLive(); });
+$("name").addEventListener("input", () => {
+  if (currentChoice && $("name").value !== currentChoice.value) { currentChoice = null; renderDoseChips([]); }
+  openList(); scheduleLive();
+});
 $("name").addEventListener("focus", () => { if ($("name").value.trim()) openList(); });
 $("name").addEventListener("blur", closeList);
 $("name").addEventListener("keydown", (ev) => {
