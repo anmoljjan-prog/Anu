@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My Medications</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>My Medications</h1>
+    <p class="note">Stored only in this browser. Nothing is uploaded to a server.</p>
+
+    <form id="med-form" autocomplete="off">
+      <input type="hidden" id="med-id">
+      <label>Name <input id="name" required placeholder="e.g. Metformin"></label>
+      <label>Dose <input id="dose" placeholder="e.g. 500 mg"></label>
+      <label>How often
+        <select id="frequency">
+          <option>Once daily</option>
+          <option>Twice daily</option>
+          <option>Three times daily</option>
+          <option>Weekly</option>
+          <option>As needed</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label>Time of day <input id="time" placeholder="e.g. Morning, with food"></label>
+      <label>Notes <textarea id="notes" rows="2" placeholder="Prescriber, purpose, side effects..."></textarea></label>
+      <div class="row">
+        <button type="submit" id="save">Add medication</button>
+        <button type="button" id="cancel" hidden>Cancel</button>
+      </div>
+    </form>
+
+    <h2>Current list</h2>
+    <ul id="list"></ul>
+    <p id="empty" class="note">No medications yet.</p>
+
+    <div class="row">
+      <button id="export" type="button">Export backup</button>
+      <label class="button">Import backup <input id="import" type="file" accept="application/json" hidden></label>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
