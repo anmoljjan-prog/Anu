@@ -6,11 +6,17 @@ function load() {
   try { const v = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 let log = load();
+const SKEY = "symptomlog.v1";
+function loadSym() {
+  try { const v = JSON.parse(localStorage.getItem(SKEY)); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+let symptoms = loadSym();
+let mode = "dose"; // which form is showing: "dose" or "symptom"
 let pendingDelete = null;
 let manualTime = false; // true once the user types a date/time themselves
 
 function persist() {
-  try { localStorage.setItem(KEY, JSON.stringify(log)); } catch { say("Could not save in this browser."); }
+  try { localStorage.setItem(KEY, JSON.stringify(log)); localStorage.setItem(SKEY, JSON.stringify(symptoms)); } catch { say("Could not save in this browser."); }
 }
 function say(msg) { $("status").textContent = msg; }
 
@@ -60,16 +66,27 @@ function renderChips() {
   chips.hidden = seen.size === 0;
 }
 
+const SEV = ["", "Very mild", "Mild", "Moderate", "Strong", "Severe"];
+
+function summarize(arr, singular, plural) {
+  if (!arr.length) return "";
+  const counts = new Map();
+  for (const e of arr) counts.set(e.name, (counts.get(e.name) || 0) + 1);
+  return arr.length + " " + (arr.length === 1 ? singular : plural) + " (" + [...counts].map(([n, c]) => (c > 1 ? n + " ×" + c : n)).join(", ") + ")";
+}
+
 function render() {
   const wrap = $("log");
   wrap.replaceChildren();
-  $("empty").hidden = log.length > 0;
-  $("backup-text").value = JSON.stringify(log, null, 2);
+  $("empty").hidden = log.length + symptoms.length > 0;
+  $("backup-text").value = JSON.stringify({ doses: log, symptoms }, null, 2);
   renderChips();
+  renderSymChips();
 
-  const sorted = [...log].sort((a, b) => b.takenAt.localeCompare(a.takenAt));
+  const all = [...log.map((e) => ({ ...e, kind: "dose" })), ...symptoms.map((e) => ({ ...e, kind: "symptom" }))]
+    .sort((a, b) => b.takenAt.localeCompare(a.takenAt));
   const days = new Map();
-  for (const e of sorted) {
+  for (const e of all) {
     const d = new Date(e.takenAt); const k = dayKey(d);
     if (!days.has(k)) days.set(k, { date: d, items: [] });
     days.get(k).items.push(e);
@@ -78,25 +95,31 @@ function render() {
     const sec = document.createElement("div"); sec.className = "day";
     const head = document.createElement("div"); head.className = "day-head";
     const h = document.createElement("h3"); h.textContent = dayLabel(date);
-    const counts = new Map();
-    for (const e of items) counts.set(e.name, (counts.get(e.name) || 0) + 1);
     const sum = document.createElement("span"); sum.className = "sum";
-    sum.textContent = items.length + (items.length === 1 ? " dose" : " doses") + " · " + [...counts].map(([n, c]) => c > 1 ? n + " ×" + c : n).join(", ");
+    sum.textContent = [summarize(items.filter((e) => e.kind === "dose"), "dose", "doses"),
+      summarize(items.filter((e) => e.kind === "symptom"), "symptom", "symptoms")].filter(Boolean).join(" · ");
     head.append(h, sum); sec.append(head);
 
     for (const e of items) {
-      const row = document.createElement("div"); row.className = "entry";
+      const row = document.createElement("div"); row.className = "entry" + (e.kind === "symptom" ? " symptom" : "");
       const t = document.createElement("span"); t.className = "t"; t.textContent = timeLabel(new Date(e.takenAt));
       const what = document.createElement("span"); what.className = "what";
       const b = document.createElement("b"); b.textContent = e.name; what.append(b);
-      if (e.dose) { const s = document.createElement("span"); s.textContent = "  " + e.dose; what.append(s); }
+      if (e.kind === "dose" && e.dose) { const s = document.createElement("span"); s.textContent = "  " + e.dose; what.append(s); }
+      if (e.kind === "symptom") {
+        const p = document.createElement("span"); p.className = "sev-pill"; p.textContent = e.severity + "/5 " + SEV[e.severity]; what.append(p);
+        if (e.notes) { const n = document.createElement("span"); n.className = "notes"; n.textContent = e.notes; what.append(n); }
+      }
+      const key = e.kind + ":" + e.id;
       const acts = document.createElement("span"); acts.className = "acts";
-      const edit = document.createElement("button"); edit.textContent = "Edit"; edit.onclick = () => startEdit(e.id);
+      const edit = document.createElement("button"); edit.textContent = "Edit"; edit.onclick = () => startEdit(e.kind, e.id);
       const del = document.createElement("button"); del.className = "danger";
-      del.textContent = pendingDelete === e.id ? "Confirm" : "Delete";
+      del.textContent = pendingDelete === key ? "Confirm" : "Delete";
       del.onclick = () => {
-        if (pendingDelete === e.id) { log = log.filter((x) => x.id !== e.id); pendingDelete = null; persist(); }
-        else pendingDelete = e.id;
+        if (pendingDelete === key) {
+          if (e.kind === "dose") log = log.filter((x) => x.id !== e.id); else symptoms = symptoms.filter((x) => x.id !== e.id);
+          pendingDelete = null; persist();
+        } else pendingDelete = key;
         render();
       };
       acts.append(edit, del);
@@ -110,20 +133,26 @@ function resetForm() {
   $("dose-form").reset();
   currentChoice = null; renderDoseChips([]); $("dose-status").textContent = "";
   $("entry-id").value = "";
-  $("save").textContent = "Log dose";
+  $("save").textContent = mode === "dose" ? "Log dose" : "Log symptom";
   $("cancel").hidden = true;
+  $("mode-dose").disabled = false; $("mode-symptom").disabled = false;
+  updateSevCaption();
   setNow();
 }
-function startEdit(id) {
-  const e = log.find((x) => x.id === id);
+function startEdit(kind, id) {
+  const e = (kind === "dose" ? log : symptoms).find((x) => x.id === id);
   if (!e) return;
+  applyMode(kind);
   $("entry-id").value = id;
-  $("name").value = e.name; $("dose").value = e.dose;
   $("when").value = toLocalInput(new Date(e.takenAt));
   manualTime = true; syncAuto();
+  if (kind === "dose") { $("name").value = e.name; $("dose").value = e.dose; }
+  else { $("symptom").value = e.name; setSeverity(e.severity); $("sym-notes").value = e.notes || ""; }
   $("save").textContent = "Save changes";
   $("cancel").hidden = false;
-  $("name").focus();
+  $("mode-dose").disabled = true; $("mode-symptom").disabled = true;
+  $("dose-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  (kind === "dose" ? $("name") : $("symptom")).focus({ preventScroll: true });
 }
 
 $("dose-form").addEventListener("submit", (ev) => {
@@ -132,9 +161,17 @@ $("dose-form").addEventListener("submit", (ev) => {
   // Automatic time is read at the moment of logging.
   const when = manualTime || id ? new Date($("when").value) : new Date();
   if (isNaN(when)) { $("when").focus(); return; }
-  const rec = { name: $("name").value.trim(), dose: $("dose").value.trim(), takenAt: when.toISOString() };
-  if (id) log = log.map((e) => (e.id === id ? { ...e, ...rec } : e));
-  else log.push({ id: newId(), ...rec });
+  if (mode === "symptom") {
+    const sev = document.querySelector('input[name="sev"]:checked');
+    if (!sev) return;
+    const rec = { name: $("symptom").value.trim(), severity: Number(sev.value), notes: $("sym-notes").value.trim(), takenAt: when.toISOString() };
+    if (id) symptoms = symptoms.map((e) => (e.id === id ? { ...e, ...rec } : e));
+    else symptoms.push({ id: newId(), ...rec });
+  } else {
+    const rec = { name: $("name").value.trim(), dose: $("dose").value.trim(), takenAt: when.toISOString() };
+    if (id) log = log.map((e) => (e.id === id ? { ...e, ...rec } : e));
+    else log.push({ id: newId(), ...rec });
+  }
   pendingDelete = null;
   persist(); resetForm(); render();
 });
@@ -148,9 +185,14 @@ $("copy").addEventListener("click", async () => {
 $("import").addEventListener("click", () => {
   try {
     const data = JSON.parse($("backup-text").value);
-    if (!Array.isArray(data) || !data.every((e) => e && typeof e.name === "string" && e.name && !isNaN(new Date(e.takenAt)))) throw new Error();
-    log = data.map((e) => ({ id: e.id || newId(), name: e.name, dose: String(e.dose ?? ""), takenAt: new Date(e.takenAt).toISOString() }));
-    persist(); render(); say("Imported " + log.length + " entries.");
+    const doseRows = Array.isArray(data) ? data : data && data.doses;
+    const symRows = Array.isArray(data) ? null : data && data.symptoms;
+    const okTime = (e) => e && typeof e.name === "string" && e.name && !isNaN(new Date(e.takenAt));
+    if (!Array.isArray(doseRows) || !doseRows.every(okTime)) throw new Error();
+    if (symRows != null && (!Array.isArray(symRows) || !symRows.every((e) => okTime(e) && e.severity >= 1 && e.severity <= 5))) throw new Error();
+    log = doseRows.map((e) => ({ id: e.id || newId(), name: e.name, dose: String(e.dose ?? ""), takenAt: new Date(e.takenAt).toISOString() }));
+    if (symRows) symptoms = symRows.map((e) => ({ id: e.id || newId(), name: e.name, severity: Math.round(Number(e.severity)), notes: String(e.notes ?? ""), takenAt: new Date(e.takenAt).toISOString() }));
+    persist(); render(); say("Imported " + log.length + " doses and " + symptoms.length + " symptoms.");
   } catch { say("That text is not a valid backup."); }
 });
 
@@ -660,3 +702,200 @@ $("live-on").addEventListener("change", () => {
   $("live-status").textContent = "";
 });
 loadRemoteNames();
+
+// ---- Symptoms ----
+// Common symptoms ("Name|Group"). Used for type-ahead; anything else can be typed freely.
+const SYMPTOMS = `Headache|Head
+Migraine|Head
+Dizziness|Head
+Lightheadedness|Head
+Brain fog|Head
+Confusion|Head
+Tremor|Head
+Numbness|Nerves
+Tingling|Nerves
+Fainting|Head
+Blurred vision|Eyes and ears
+Dry eyes|Eyes and ears
+Ringing in ears|Eyes and ears
+Ear pain|Eyes and ears
+Nausea|Digestive
+Vomiting|Digestive
+Diarrhea|Digestive
+Constipation|Digestive
+Bloating|Digestive
+Gas|Digestive
+Stomach pain|Digestive
+Heartburn|Digestive
+Acid reflux|Digestive
+Loss of appetite|Digestive
+Increased appetite|Digestive
+Dry mouth|Digestive
+Metallic taste|Digestive
+Abdominal cramps|Digestive
+Insomnia|Sleep and mood
+Drowsiness|Sleep and mood
+Fatigue|Sleep and mood
+Anxiety|Sleep and mood
+Low mood|Sleep and mood
+Irritability|Sleep and mood
+Mood swings|Sleep and mood
+Restlessness|Sleep and mood
+Vivid dreams|Sleep and mood
+Nightmares|Sleep and mood
+Back pain|Pain
+Neck pain|Pain
+Joint pain|Pain
+Muscle pain|Pain
+Muscle cramps|Pain
+Muscle weakness|Pain
+Chest pain|Pain
+Nerve pain|Pain
+Tooth pain|Pain
+Cough|Breathing
+Shortness of breath|Breathing
+Wheezing|Breathing
+Runny nose|Breathing
+Stuffy nose|Breathing
+Sneezing|Breathing
+Sore throat|Breathing
+Palpitations|Heart
+Fast heartbeat|Heart
+Slow heartbeat|Heart
+Low blood pressure|Heart
+High blood pressure|Heart
+Swollen ankles|Heart
+Rash|Skin
+Itching|Skin
+Hives|Skin
+Dry skin|Skin
+Flushing|Skin
+Sweating|Skin
+Night sweats|Skin
+Bruising|Skin
+Hair loss|Skin
+Fever|General
+Chills|General
+Weight gain|General
+Weight loss|General
+Increased thirst|General
+Swelling|General
+Hot flashes|General
+Frequent urination|Urinary
+Painful urination|Urinary`.split("\n").map((l) => { const [label, group] = l.split("|"); return { label, value: label, sub: group, key: label.toLowerCase() }; });
+
+function renderSymChips() {
+  const counts = new Map();
+  for (const e of symptoms) counts.set(e.name, (counts.get(e.name) || 0) + 1);
+  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const box = $("sym-chips");
+  box.replaceChildren();
+  for (const [name] of top) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip"; b.textContent = name;
+    b.onclick = () => { $("symptom").value = name; symCombo.close(); document.querySelector('input[name="sev"]').focus(); };
+    box.append(b);
+  }
+  box.hidden = top.length === 0;
+}
+
+function symptomOptions(q) {
+  q = q.trim().toLowerCase();
+  if (!q) return [];
+  const pool = [];
+  const seen = new Set();
+  for (const e of [...symptoms].sort((a, b) => b.takenAt.localeCompare(a.takenAt))) {
+    if (seen.has(e.name.toLowerCase())) continue;
+    seen.add(e.name.toLowerCase());
+    pool.push({ label: e.name, value: e.name, sub: "Logged before", recent: true, key: e.name.toLowerCase() });
+  }
+  pool.push(...SYMPTOMS.filter((o) => !seen.has(o.key)));
+  const scored = [];
+  for (const o of pool) {
+    const sc = score(o.key, q);
+    if (sc >= 0) scored.push({ o, sc: o.recent ? sc - 0.5 : sc });
+  }
+  scored.sort((a, b) => a.sc - b.sc || a.o.label.localeCompare(b.o.label));
+  const out = scored.slice(0, 8).map((x) => x.o);
+  const typed = $("symptom").value.trim();
+  if (typed && !out.some((o) => o.value.toLowerCase() === typed.toLowerCase())) out.push({ label: "Use “" + typed + "”", value: typed, sub: "as typed" });
+  return out;
+}
+
+// Small reusable type-ahead for a text input and a <ul role="listbox">.
+function makeCombo(input, ul, optionsFor, onPick) {
+  let shown = [];
+  let active = -1;
+  let quietUntil = 0;
+  const api = {};
+  api.close = () => { ul.hidden = true; input.setAttribute("aria-expanded", "false"); input.removeAttribute("aria-activedescendant"); active = -1; };
+  const highlightAt = (i) => {
+    active = i;
+    [...ul.children].forEach((li, n) => li.setAttribute("aria-selected", String(n === i)));
+    if (i >= 0) { input.setAttribute("aria-activedescendant", ul.id + "-opt-" + i); ul.children[i].scrollIntoView({ block: "nearest" }); }
+    else input.removeAttribute("aria-activedescendant");
+  };
+  const pick = (o) => { quietUntil = Date.now() + 500; input.value = o.value; api.close(); onPick(o); };
+  api.open = () => {
+    shown = optionsFor(input.value);
+    ul.replaceChildren();
+    if (!shown.length) { api.close(); return; }
+    shown.forEach((o, i) => {
+      const li = document.createElement("li");
+      li.id = ul.id + "-opt-" + i; li.setAttribute("role", "option"); li.setAttribute("aria-selected", "false");
+      const n = document.createElement("span"); n.className = "opt-name"; n.textContent = o.label;
+      const s = document.createElement("span"); s.className = "opt-sub" + (o.recent ? " opt-recent" : ""); s.textContent = o.sub;
+      li.append(n, s);
+      li.addEventListener("mousedown", (ev) => ev.preventDefault());
+      li.addEventListener("click", () => pick(o));
+      ul.append(li);
+    });
+    ul.hidden = false; input.setAttribute("aria-expanded", "true"); active = -1;
+  };
+  input.addEventListener("input", api.open);
+  input.addEventListener("focus", () => { if (Date.now() > quietUntil && input.value.trim()) api.open(); });
+  input.addEventListener("blur", api.close);
+  input.addEventListener("keydown", (ev) => {
+    const open = !ul.hidden;
+    if (ev.key === "ArrowDown") { ev.preventDefault(); if (!open) api.open(); else highlightAt((active + 1) % shown.length); }
+    else if (ev.key === "ArrowUp" && open) { ev.preventDefault(); highlightAt(active <= 0 ? shown.length - 1 : active - 1); }
+    else if (ev.key === "Enter" && open && active >= 0) { ev.preventDefault(); pick(shown[active]); }
+    else if (ev.key === "Escape" && open) { ev.preventDefault(); api.close(); }
+  });
+  return api;
+}
+const symCombo = makeCombo($("symptom"), $("sym-suggest"), symptomOptions, () => document.querySelector('input[name="sev"]').focus());
+
+function setSeverity(n) {
+  const r = document.querySelector('input[name="sev"][value="' + n + '"]');
+  if (r) r.checked = true;
+  updateSevCaption();
+}
+function updateSevCaption() {
+  const r = document.querySelector('input[name="sev"]:checked');
+  const cap = $("sev-caption");
+  if (!r) { cap.textContent = "1 is barely noticeable, 5 is the worst you can imagine."; cap.classList.remove("sev-caption-warn"); return; }
+  const n = Number(r.value);
+  cap.textContent = n + " of 5: " + SEV[n] + "." + (n >= 4 ? " If this is severe or sudden, or you have trouble breathing, chest pain, or swelling of the face or throat, get medical help now. In Canada, call 911 in an emergency, or contact your pharmacist or doctor for advice." : "");
+  cap.classList.toggle("sev-caption-warn", n >= 4);
+}
+$("sev-group").addEventListener("change", updateSevCaption);
+
+function applyMode(m) {
+  mode = m;
+  const med = m === "dose";
+  $("med-fields").hidden = !med;
+  $("sym-fields").hidden = med;
+  $("name").required = med;
+  $("symptom").required = !med;
+  document.querySelectorAll('input[name="sev"]').forEach((r) => { r.required = !med; });
+  $("mode-dose").setAttribute("aria-pressed", String(med));
+  $("mode-symptom").setAttribute("aria-pressed", String(!med));
+  if (!$("entry-id").value) $("save").textContent = med ? "Log dose" : "Log symptom";
+  closeList(); symCombo.close();
+}
+$("mode-dose").addEventListener("click", () => applyMode("dose"));
+$("mode-symptom").addEventListener("click", () => applyMode("symptom"));
+applyMode("dose");
+renderSymChips();
+

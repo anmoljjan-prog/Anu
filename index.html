@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>Medication Log</title>
+  <title>Medication and Symptom Log</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
@@ -13,12 +13,17 @@
 <body>
 <main>
   <header>
-    <h1>Medication Log</h1>
-    <p class="note">Record each dose when you take it. Saved in this browser only.</p>
+    <h1>Medication and Symptom Log</h1>
+    <p class="note">Record each dose when you take it and any symptoms as they happen. Saved in this browser only.</p>
   </header>
 
   <form id="dose-form" autocomplete="off">
     <input type="hidden" id="entry-id">
+    <div class="modes full" role="group" aria-label="What are you logging?">
+      <button type="button" id="mode-dose" aria-pressed="true">Medication</button>
+      <button type="button" id="mode-symptom" aria-pressed="false">Symptom</button>
+    </div>
+    <div class="contents" id="med-fields">
     <div class="chips full" id="chips" aria-label="Recent medications"></div>
     <div class="combo">
       <label for="name">Medication</label>
@@ -37,8 +42,32 @@
         <span>Also search Health Canada and FDA databases as I type. What you type is sent to them.</span></label>
       <div class="src-note" id="live-status" role="status"></div>
     </div>
+    </div>
+    <div class="contents" id="sym-fields" hidden>
+      <div class="chips full" id="sym-chips" aria-label="Your most frequent symptoms" hidden></div>
+      <div class="combo full">
+        <label for="symptom">Symptom</label>
+        <input id="symptom" placeholder="Start typing, e.g. headache"
+          role="combobox" aria-expanded="false" aria-controls="sym-suggest" aria-autocomplete="list" autocapitalize="off">
+        <ul id="sym-suggest" role="listbox" aria-label="Matching symptoms" hidden></ul>
+      </div>
+      <fieldset class="full sev" id="sev-group">
+        <legend>How bad is it?</legend>
+        <div class="sev-row">
+          <label><input type="radio" name="sev" value="1"><span>1</span></label>
+          <label><input type="radio" name="sev" value="2"><span>2</span></label>
+          <label><input type="radio" name="sev" value="3"><span>3</span></label>
+          <label><input type="radio" name="sev" value="4"><span>4</span></label>
+          <label><input type="radio" name="sev" value="5"><span>5</span></label>
+        </div>
+        <div class="src-note" id="sev-caption" aria-live="polite">1 is barely noticeable, 5 is the worst you can imagine.</div>
+      </fieldset>
+      <label class="full">Notes (optional)
+        <textarea id="sym-notes" rows="2" placeholder="What were you doing, how long did it last, anything that helped"></textarea>
+      </label>
+    </div>
     <div class="when full">
-      <label>Date and time taken
+      <label>Date and time
         <input id="when" type="datetime-local" required>
       </label>
       <button type="button" id="now">Use now</button>
@@ -53,7 +82,7 @@
   <section>
     <h2>Daily log</h2>
     <div id="log" style="display:grid;gap:22px"></div>
-    <div id="empty" class="empty">Nothing logged yet. Your first dose will show up here, grouped by day.</div>
+    <div id="empty" class="empty">Nothing logged yet. Your doses and symptoms will show up here, grouped by day.</div>
   </section>
 
   <details id="backup">
