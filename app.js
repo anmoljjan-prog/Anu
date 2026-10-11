@@ -419,11 +419,15 @@ async function getJSON(url, signal) {
 }
 function unitText(u) {
   const x = String(u || "").trim().toLowerCase();
-  return x === "iu" ? "IU" : x;
+  return x === "iu" ? "IU" : x === "ml" ? "mL" : x;
 }
+function isPercent(r) { return String(r.strength_unit || "").includes("%"); }
+// A percentage is a concentration, not an amount to take, so it is never offered as a dose.
 function strengthText(r) {
   const n = String(r.strength ?? "").trim();
-  return n ? (n + " " + unitText(r.strength_unit)).trim() : "";
+  if (!n || isPercent(r)) return "";
+  const per = String(r.dosage_value ?? "").trim() ? " / " + (String(r.dosage_value).trim() + " " + unitText(r.dosage_unit)).trim() : "";
+  return (n + " " + unitText(r.strength_unit)).trim() + per;
 }
 function fdaStrength(list) {
   const parts = (Array.isArray(list) ? list : []).map((a) => String(a.strength || "").replace(/\/1$/, "").trim()).filter(Boolean);
@@ -467,6 +471,7 @@ async function fetchLive(q, signal) {
 async function fetchStrengthsByCode(codes) {
   const out = [];
   let answered = 0;
+  let percentOnly = 0;
   const results = await Promise.allSettled(codes.map((c) =>
     getJSON("https://health-products.canada.ca/api/drug/activeingredient/?id=" + encodeURIComponent(c) + "&lang=en&type=json")));
   for (const r of results) {
@@ -475,8 +480,9 @@ async function fetchStrengthsByCode(codes) {
     if (!Array.isArray(r.value)) continue;
     const text = r.value.map(strengthText).filter(Boolean).join(" / ");
     if (text && !out.includes(text)) out.push(text);
+    else if (!text && r.value.some(isPercent)) percentOnly++;
   }
-  return { out, answered, total: codes.length };
+  return { out, answered, percentOnly, total: codes.length };
 }
 function scheduleLive() {
   if (!liveEnabled()) return;
@@ -590,7 +596,9 @@ async function showDoses(chosen) {
       known.push(...r.out);
       if (currentChoice === chosen) {
         status.textContent = r.answered === 0 ? "Health Canada did not respond to the strength lookup."
-          : r.out.length ? "" : "Health Canada has no strength on file for this product. Type your dose.";
+          : r.out.length ? ""
+          : r.percentOnly ? "Health Canada lists this as a percentage (a concentration), not an amount per dose. Check the label for how much to take and type it in."
+          : "Health Canada has no strength on file for this product. Type your dose.";
       }
     } catch { status.textContent = "Strength lookup failed."; }
     if (currentChoice !== chosen) return;
