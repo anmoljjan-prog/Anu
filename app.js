@@ -488,7 +488,7 @@ function scheduleLive() {
       if (failed) return;
       liveCache.set(q, options);
       if (liveCache.size > 12) liveCache.delete(liveCache.keys().next().value);
-      if ($("name").value.trim().toLowerCase() === q && document.activeElement === $("name")) openList();
+      if ($("name").value.trim().toLowerCase() === q && document.activeElement === $("name") && Date.now() > noReopenUntil) openList();
     } catch { /* aborted or offline: the saved lists still work */ }
   }, 300);
 }
@@ -583,7 +583,9 @@ async function showDoses(chosen) {
     renderDoseChips(list()); prefill();
   }
 }
+let noReopenUntil = 0;
 function choose(o) {
+  noReopenUntil = Date.now() + 500;
   $("name").value = o.value;
   currentChoice = o;
   closeList();
@@ -605,7 +607,8 @@ function openList() {
     const n = document.createElement("span"); n.className = "opt-name"; n.textContent = o.label;
     const s = document.createElement("span"); s.className = "opt-sub" + (o.recent ? " opt-recent" : ""); s.textContent = o.sub;
     li.append(n, s);
-    li.addEventListener("pointerdown", (ev) => { ev.preventDefault(); choose(o); });
+    li.addEventListener("mousedown", (ev) => ev.preventDefault()); // keep focus in the field until the click lands
+    li.addEventListener("click", () => choose(o));
     ul.append(li);
   });
   ul.hidden = false; $("name").setAttribute("aria-expanded", "true"); active = -1;
@@ -614,7 +617,7 @@ $("name").addEventListener("input", () => {
   if (currentChoice && $("name").value !== currentChoice.value) { currentChoice = null; renderDoseChips([]); }
   openList(); scheduleLive();
 });
-$("name").addEventListener("focus", () => { if ($("name").value.trim()) openList(); });
+$("name").addEventListener("focus", () => { if (Date.now() > noReopenUntil && $("name").value.trim()) openList(); });
 $("name").addEventListener("blur", closeList);
 $("name").addEventListener("keydown", (ev) => {
   const open = !$("suggest").hidden;
