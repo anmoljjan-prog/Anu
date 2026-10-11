@@ -417,7 +417,7 @@ async function getJSON(url, signal) {
 }
 async function fetchLive(q, signal) {
   const safe = q.replace(/[^a-z0-9 ]/gi, " ").replace(/\s+/g, " ").trim();
-  if (safe.length < 3) return { options: [], failed: false };
+  if (safe.length < 3) return { options: [], failed: false, report: "" };
   const full = encodeURIComponent(safe);
   const first = encodeURIComponent(safe.split(" ")[0]);
   const jobs = [
@@ -432,6 +432,8 @@ async function fetchLive(q, signal) {
       })),
   ];
   const settled = await Promise.allSettled(jobs);
+  const names = ["Health Canada brands", "Health Canada ingredients", "FDA"];
+  const report = settled.map((r, i) => names[i] + ": " + (r.status === "fulfilled" ? r.value.length + " found" : "no response")).join(" · ");
   const seen = new Set();
   const options = [];
   for (const r of settled) {
@@ -445,7 +447,7 @@ async function fetchLive(q, signal) {
       options.push({ label: item.name, value, sub: item.generic || item.sub, key: item.name.toLowerCase() });
     }
   }
-  return { options: options.slice(0, 60), failed: settled.every((r) => r.status === "rejected") };
+  return { options: options.slice(0, 60), failed: settled.every((r) => r.status === "rejected"), report };
 }
 function scheduleLive() {
   if (!liveEnabled()) return;
@@ -456,8 +458,8 @@ function scheduleLive() {
     if (liveCtl) liveCtl.abort();
     liveCtl = new AbortController();
     try {
-      const { options, failed } = await fetchLive(q, liveCtl.signal);
-      $("live-status").textContent = failed ? "Online lookup is unavailable right now. Showing the saved list only." : "";
+      const { options, failed, report } = await fetchLive(q, liveCtl.signal);
+      $("live-status").textContent = failed ? "Online lookup is unavailable right now. Showing the saved list only. (" + report + ")" : "Searched \u201c" + q + "\u201d. " + report;
       if (failed) return;
       liveCache.set(q, options);
       if (liveCache.size > 12) liveCache.delete(liveCache.keys().next().value);
