@@ -173,7 +173,7 @@ $("dose-form").addEventListener("submit", (ev) => {
     else log.push({ id: newId(), ...rec });
   }
   pendingDelete = null;
-  persist(); resetForm(); render();
+  persist(); resetForm(); render(); protectStorage();
 });
 $("cancel").addEventListener("click", resetForm);
 
@@ -898,4 +898,23 @@ $("mode-dose").addEventListener("click", () => applyMode("dose"));
 $("mode-symptom").addEventListener("click", () => applyMode("symptom"));
 applyMode("dose");
 renderSymChips();
+
+// ---- Ask the browser not to clear this data automatically ----
+async function protectStorage() {
+  const note = $("persist-note");
+  if (!navigator.storage || !navigator.storage.persist) {
+    note.textContent = "This browser can't be asked to protect your data from automatic cleanup. Back up regularly.";
+    return;
+  }
+  try {
+    let ok = await navigator.storage.persisted();
+    if (!ok) ok = await navigator.storage.persist();
+    note.textContent = ok
+      ? "Your browser has agreed not to clear this data automatically. Clearing site data yourself will still erase it."
+      : "Your browser has not agreed to protect this data from automatic cleanup. Bookmarking this page and using it regularly helps. Back up regularly.";
+  } catch {
+    note.textContent = "Could not check whether your browser protects this data. Back up regularly.";
+  }
+}
+protectStorage();
 
