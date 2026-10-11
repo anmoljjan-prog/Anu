@@ -3,45 +3,63 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Medications</title>
+  <meta name="color-scheme" content="light dark">
+  <title>Medication Log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Instrument+Sans:wght@400;500;600&display=swap">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main>
-    <h1>My Medications</h1>
-    <p class="note">Stored only in this browser. Nothing is uploaded to a server.</p>
+<main>
+  <header>
+    <h1>Medication Log</h1>
+    <p class="note">Record each dose when you take it. Saved in this browser only.</p>
+  </header>
 
-    <form id="med-form" autocomplete="off">
-      <input type="hidden" id="med-id">
-      <label>Name <input id="name" required placeholder="e.g. Metformin"></label>
-      <label>Dose <input id="dose" placeholder="e.g. 500 mg"></label>
-      <label>How often
-        <select id="frequency">
-          <option>Once daily</option>
-          <option>Twice daily</option>
-          <option>Three times daily</option>
-          <option>Weekly</option>
-          <option>As needed</option>
-          <option>Other</option>
-        </select>
-      </label>
-      <label>Time of day <input id="time" placeholder="e.g. Morning, with food"></label>
-      <label>Notes <textarea id="notes" rows="2" placeholder="Prescriber, purpose, side effects..."></textarea></label>
-      <div class="row">
-        <button type="submit" id="save">Add medication</button>
-        <button type="button" id="cancel" hidden>Cancel</button>
-      </div>
-    </form>
-
-    <h2>Current list</h2>
-    <ul id="list"></ul>
-    <p id="empty" class="note">No medications yet.</p>
-
-    <div class="row">
-      <button id="export" type="button">Export backup</button>
-      <label class="button">Import backup <input id="import" type="file" accept="application/json" hidden></label>
+  <form id="dose-form" autocomplete="off">
+    <input type="hidden" id="entry-id">
+    <div class="chips full" id="chips" aria-label="Recent medications"></div>
+    <div class="combo">
+      <label for="name">Medication</label>
+      <input id="name" required placeholder="Start typing a brand or generic name"
+        role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" autocapitalize="off">
+      <div class="src-note" id="src-note"></div>
+      <ul id="suggest" role="listbox" aria-label="Matching medications" hidden></ul>
     </div>
-  </main>
-  <script src="app.js"></script>
+    <label>Dose
+      <input id="dose" placeholder="e.g. 500 mg">
+    </label>
+    <div class="when full">
+      <label>Date and time taken
+        <input id="when" type="datetime-local" required>
+      </label>
+      <button type="button" id="now">Use now</button>
+    </div>
+    <div class="auto full" id="auto-note"></div>
+    <div class="row full">
+      <button type="submit" id="save" class="primary">Log dose</button>
+      <button type="button" id="cancel" hidden>Cancel edit</button>
+    </div>
+  </form>
+
+  <section>
+    <h2>Daily log</h2>
+    <div id="log" style="display:grid;gap:22px"></div>
+    <div id="empty" class="empty">Nothing logged yet. Your first dose will show up here, grouped by day.</div>
+  </section>
+
+  <details id="backup">
+    <summary>Back up or move your log</summary>
+    <p class="note">Copy the text below and keep it somewhere safe. To restore, paste it back here and press Import.</p>
+    <textarea id="backup-text" aria-label="Backup text" spellcheck="false"></textarea>
+    <div class="row">
+      <button type="button" id="copy">Copy backup</button>
+      <button type="button" id="import">Import (replaces log)</button>
+      <span class="status" id="status" role="status"></span>
+    </div>
+  </details>
+</main>
+<script src="app.js"></script>
 </body>
 </html>
