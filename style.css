@@ -73,3 +73,5 @@ details .row { margin-top: 10px; }
 #suggest .opt-sub { color: var(--muted); font-size: .8rem; text-align: right; overflow-wrap: anywhere; min-width: 0; }
 #suggest .opt-recent { color: var(--accent); }
 .src-note { font-size: .78rem; color: var(--muted); }
+.live-toggle { display: flex; gap: 8px; align-items: flex-start; font-size: .8rem; }
+.live-toggle input { width: auto; margin-top: 3px; }

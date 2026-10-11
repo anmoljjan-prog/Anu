@@ -24,12 +24,17 @@
       <label for="name">Medication</label>
       <input id="name" required placeholder="Start typing a brand or generic name"
         role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" autocapitalize="off">
-      <div class="src-note" id="src-note"></div>
       <ul id="suggest" role="listbox" aria-label="Matching medications" hidden></ul>
     </div>
     <label>Dose
       <input id="dose" placeholder="e.g. 500 mg">
     </label>
+    <div class="full lookup">
+      <div class="src-note" id="src-note"></div>
+      <label class="live-toggle"><input type="checkbox" id="live-on">
+        <span>Also search Health Canada and FDA databases as I type. What you type is sent to them.</span></label>
+      <div class="src-note" id="live-status" role="status"></div>
+    </div>
     <div class="when full">
       <label>Date and time taken
         <input id="when" type="datetime-local" required>

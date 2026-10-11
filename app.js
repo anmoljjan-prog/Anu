@@ -398,6 +398,74 @@ async function loadRemoteNames() {
   }
 }
 
+
+// Live lookups while typing: Health Canada Drug Product Database (brand names and active ingredients)
+// and the US FDA product directory (openFDA). Only runs when the "search online" box is ticked.
+const LIVE_KEY = "livesearch.enabled";
+function liveEnabled() { try { return localStorage.getItem(LIVE_KEY) !== "off"; } catch { return true; } }
+const liveCache = new Map(); // query -> options
+let liveTimer = null;
+let liveCtl = null;
+
+function titleCase(str) {
+  return String(str || "").toLowerCase().replace(/(^|[\s\-\/(])([a-z])/g, (m, a, b) => a + b.toUpperCase()).trim();
+}
+async function getJSON(url, signal) {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+async function fetchLive(q, signal) {
+  const safe = q.replace(/[^a-z0-9 ]/gi, " ").replace(/\s+/g, " ").trim();
+  if (safe.length < 3) return { options: [], failed: false };
+  const full = encodeURIComponent(safe);
+  const first = encodeURIComponent(safe.split(" ")[0]);
+  const jobs = [
+    getJSON("https://health-products.canada.ca/api/drug/drugproduct/?brandname=" + full + "&lang=en&type=json", signal)
+      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.brand_name), sub: "Health Canada" }))),
+    getJSON("https://health-products.canada.ca/api/drug/activeingredient/?ingredientname=" + full + "&lang=en&type=json", signal)
+      .then((rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ name: titleCase(r.ingredient_name), sub: "Health Canada" }))),
+    getJSON("https://api.fda.gov/drug/ndc.json?search=brand_name:" + first + "*+OR+generic_name:" + first + "*&limit=25", signal)
+      .then((j) => (j && Array.isArray(j.results) ? j.results : []).map((r) => {
+        const generic = String(r.generic_name || "").toLowerCase();
+        return { name: titleCase(r.brand_name || r.generic_name), generic: generic.length <= 40 ? generic : "", sub: "FDA" };
+      })),
+  ];
+  const settled = await Promise.allSettled(jobs);
+  const seen = new Set();
+  const options = [];
+  for (const r of settled) {
+    if (r.status !== "fulfilled") continue;
+    for (const item of r.value) {
+      if (!item.name) continue;
+      const value = item.generic && item.generic !== item.name.toLowerCase() ? item.name + " (" + item.generic + ")" : item.name;
+      const k = value.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      options.push({ label: item.name, value, sub: item.generic || item.sub, key: item.name.toLowerCase() });
+    }
+  }
+  return { options: options.slice(0, 60), failed: settled.every((r) => r.status === "rejected") };
+}
+function scheduleLive() {
+  if (!liveEnabled()) return;
+  const q = $("name").value.trim().toLowerCase();
+  if (q.length < 3 || liveCache.has(q)) return;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(async () => {
+    if (liveCtl) liveCtl.abort();
+    liveCtl = new AbortController();
+    try {
+      const { options, failed } = await fetchLive(q, liveCtl.signal);
+      $("live-status").textContent = failed ? "Online lookup is unavailable right now. Showing the saved list only." : "";
+      if (failed) return;
+      liveCache.set(q, options);
+      if (liveCache.size > 12) liveCache.delete(liveCache.keys().next().value);
+      if ($("name").value.trim().toLowerCase() === q && document.activeElement === $("name")) openList();
+    } catch { /* aborted or offline: the saved lists still work */ }
+  }, 300);
+}
+
 let shown = [];
 let active = -1;
 
@@ -421,6 +489,12 @@ function matches(q) {
   for (const n of remoteNames) {
     const k = n.toLowerCase();
     if (!known.has(k) && !seen.has(n)) pool.push({ label: n, value: n, sub: "RxNorm", key: k });
+  }
+  if (liveEnabled()) {
+    const have = new Set(pool.map((o) => o.value.toLowerCase()));
+    for (const opts of liveCache.values()) for (const o of opts) {
+      if (!have.has(o.value.toLowerCase()) && !known.has(o.key)) { have.add(o.value.toLowerCase()); pool.push(o); }
+    }
   }
   const scored = [];
   for (const o of pool) {
@@ -448,6 +522,10 @@ function choose(o) {
 }
 function openList() {
   shown = matches($("name").value);
+  const typed = $("name").value.trim();
+  if (typed && !shown.some((o) => o.value.toLowerCase() === typed.toLowerCase())) {
+    shown.push({ label: "Use \u201c" + typed + "\u201d", value: typed, sub: "as typed" });
+  }
   const ul = $("suggest");
   ul.replaceChildren();
   if (!shown.length) { closeList(); return; }
@@ -462,7 +540,7 @@ function openList() {
   });
   ul.hidden = false; $("name").setAttribute("aria-expanded", "true"); active = -1;
 }
-$("name").addEventListener("input", openList);
+$("name").addEventListener("input", () => { openList(); scheduleLive(); });
 $("name").addEventListener("focus", () => { if ($("name").value.trim()) openList(); });
 $("name").addEventListener("blur", closeList);
 $("name").addEventListener("keydown", (ev) => {
@@ -475,4 +553,9 @@ $("name").addEventListener("keydown", (ev) => {
 
 setNow();
 render();
+$("live-on").checked = liveEnabled();
+$("live-on").addEventListener("change", () => {
+  try { localStorage.setItem(LIVE_KEY, $("live-on").checked ? "on" : "off"); } catch {}
+  $("live-status").textContent = "";
+});
 loadRemoteNames();
