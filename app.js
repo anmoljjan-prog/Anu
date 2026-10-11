@@ -54,7 +54,7 @@ function renderChips() {
     const b = document.createElement("button");
     b.type = "button"; b.className = "chip";
     b.textContent = e.dose ? e.name + " " + e.dose : e.name;
-    b.onclick = () => { $("name").value = e.name; $("dose").value = e.dose; currentChoice = null; renderDoseChips([]); $("dose").focus(); };
+    b.onclick = () => { $("name").value = e.name; $("dose").value = e.dose; currentChoice = null; renderDoseChips([]); $("dose-status").textContent = ""; $("dose").focus(); };
     chips.append(b);
   }
   chips.hidden = seen.size === 0;
@@ -108,7 +108,7 @@ function render() {
 
 function resetForm() {
   $("dose-form").reset();
-  currentChoice = null; renderDoseChips([]);
+  currentChoice = null; renderDoseChips([]); $("dose-status").textContent = "";
   $("entry-id").value = "";
   $("save").textContent = "Log dose";
   $("cancel").hidden = true;
@@ -414,7 +414,8 @@ function titleCase(str) {
 async function getJSON(url, signal) {
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) || (data && data.results) ? data : (data && typeof data === "object" ? [data] : []);
 }
 function unitText(u) {
   const x = String(u || "").trim().toLowerCase();
@@ -465,14 +466,17 @@ async function fetchLive(q, signal) {
 // Strengths for a Health Canada brand: one request per product code (a brand can have several products).
 async function fetchStrengthsByCode(codes) {
   const out = [];
+  let answered = 0;
   const results = await Promise.allSettled(codes.map((c) =>
     getJSON("https://health-products.canada.ca/api/drug/activeingredient/?id=" + encodeURIComponent(c) + "&lang=en&type=json")));
   for (const r of results) {
-    if (r.status !== "fulfilled" || !Array.isArray(r.value)) continue;
+    if (r.status !== "fulfilled") continue;
+    answered++;
+    if (!Array.isArray(r.value)) continue;
     const text = r.value.map(strengthText).filter(Boolean).join(" / ");
     if (text && !out.includes(text)) out.push(text);
   }
-  return out;
+  return { out, answered, total: codes.length };
 }
 function scheduleLive() {
   if (!liveEnabled()) return;
@@ -576,11 +580,24 @@ async function showDoses(chosen) {
     if (last) $("dose").value = last;
     else if (list().length === 1) $("dose").value = list()[0];
   };
+  const status = $("dose-status");
+  status.textContent = "";
   renderDoseChips(list()); prefill();
   if (o.codes && o.codes.length && liveEnabled()) {
-    try { known.push(...(await fetchStrengthsByCode(o.codes))); } catch {}
+    status.textContent = "Looking up strengths...";
+    try {
+      const r = await fetchStrengthsByCode(o.codes);
+      known.push(...r.out);
+      if (currentChoice === chosen) {
+        status.textContent = r.answered === 0 ? "Health Canada did not respond to the strength lookup."
+          : r.out.length ? "" : "Health Canada has no strength on file for this product. Type your dose.";
+      }
+    } catch { status.textContent = "Strength lookup failed."; }
     if (currentChoice !== chosen) return;
     renderDoseChips(list()); prefill();
+  } else if (!list().length) {
+    const why = !liveEnabled() ? "Online lookup is switched off." : o.recent ? "No strength lookup is available for this entry." : "No strengths available for this entry.";
+    status.textContent = why + " Type your dose.";
   }
 }
 let noReopenUntil = 0;
@@ -614,7 +631,7 @@ function openList() {
   ul.hidden = false; $("name").setAttribute("aria-expanded", "true"); active = -1;
 }
 $("name").addEventListener("input", () => {
-  if (currentChoice && $("name").value !== currentChoice.value) { currentChoice = null; renderDoseChips([]); }
+  if (currentChoice && $("name").value !== currentChoice.value) { currentChoice = null; renderDoseChips([]); $("dose-status").textContent = ""; }
   openList(); scheduleLive();
 });
 $("name").addEventListener("focus", () => { if (Date.now() > noReopenUntil && $("name").value.trim()) openList(); });

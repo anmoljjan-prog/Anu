@@ -77,3 +77,4 @@ details .row { margin-top: 10px; }
 .live-toggle input { width: auto; margin-top: 3px; }
 
 [hidden] { display: none !important; }
+.src-note:empty { display: none; }
