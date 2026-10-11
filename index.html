@@ -17,6 +17,14 @@
     <p class="note">Record each dose when you take it and any symptoms as they happen. Saved in this browser only.</p>
   </header>
 
+  <div class="banner" id="backup-banner" role="status" hidden>
+    <span id="banner-text"></span>
+    <span class="row">
+      <button type="button" id="banner-download" class="primary">Download backup</button>
+      <button type="button" id="banner-snooze">Remind me tomorrow</button>
+    </span>
+  </div>
+
   <form id="dose-form" autocomplete="off">
     <input type="hidden" id="entry-id">
     <div class="modes full" role="group" aria-label="What are you logging?">
@@ -89,10 +97,13 @@
     <summary>Back up or move your log</summary>
     <p class="note">Copy the text below and keep it somewhere safe. To restore, paste it back here and press Import.</p>
     <p class="note" id="persist-note"></p>
+    <p class="note" id="last-backup"></p>
     <textarea id="backup-text" aria-label="Backup text" spellcheck="false"></textarea>
     <div class="row">
+      <button type="button" id="download">Download backup file</button>
       <button type="button" id="copy">Copy backup</button>
       <button type="button" id="import">Import (replaces log)</button>
+      <label class="button file-btn">Import from file<input type="file" id="import-file" accept="application/json,.json" hidden></label>
       <span class="status" id="status" role="status"></span>
     </div>
   </details>

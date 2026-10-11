@@ -918,3 +918,44 @@ async function protectStorage() {
 }
 protectStorage();
 
+// ---- Backups: one-click download and a weekly reminder ----
+const BK_KEY = "lastBackup.v1";
+const SNOOZE_KEY = "backupSnooze.v1";
+const WEEK = 7 * 24 * 60 * 60 * 1000;
+function getNum(k) { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } }
+function setNum(k, v) { try { localStorage.setItem(k, String(v)); } catch {} }
+
+function updateBanner() {
+  const last = getNum(BK_KEY);
+  const has = log.length + symptoms.length > 0;
+  $("last-backup").textContent = last ? "Last backup: " + new Date(last).toLocaleString() + "." : "No backup made yet.";
+  const due = has && Date.now() - last > WEEK && Date.now() > getNum(SNOOZE_KEY);
+  $("backup-banner").hidden = !due;
+  if (due) {
+    const days = Math.floor((Date.now() - last) / 86400000);
+    $("banner-text").textContent = last ? "Your last backup was " + days + (days === 1 ? " day" : " days") + " ago." : "You haven't backed up your log yet.";
+  }
+}
+function markBackup() { setNum(BK_KEY, Date.now()); updateBanner(); }
+function downloadBackup() {
+  const blob = new Blob([JSON.stringify({ doses: log, symptoms }, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "medication-log-backup-" + dayKey(new Date()) + ".json";
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  markBackup();
+  say("Backup downloaded. Keep the file somewhere safe.");
+}
+$("download").addEventListener("click", downloadBackup);
+$("banner-download").addEventListener("click", downloadBackup);
+$("banner-snooze").addEventListener("click", () => { setNum(SNOOZE_KEY, Date.now() + 24 * 60 * 60 * 1000); updateBanner(); });
+$("copy").addEventListener("click", () => setTimeout(markBackup, 0));
+$("import-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { $("backup-text").value = await f.text(); $("import").click(); } catch { say("Could not read that file."); }
+  e.target.value = "";
+});
+updateBanner();
+
